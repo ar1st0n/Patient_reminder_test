@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum FamilyInviteStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REVOKED
+}
+
+enum PrescriptionStatus {
+  UPLOADED
+  PROCESSING
+  PENDING_REVIEW
+  CONFIRMED
+  FAILED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+
+  prescriptions Prescription[] @relation("UserPrescriptions")
+  sentInvites   FamilyInvite[] @relation("SentInvites")
+  googleToken   GoogleToken?
+}
+
+model GoogleToken {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  accessToken  String?
+  refreshToken String?   @unique // Encrypted
+  expiryDate   DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model FamilyExportEvent {
+  id                 String   @id @default(cuid())
+  patientUserId      String
+  familyUserId       String
+  prescriptionItemId String
+  calendarId         String
+  googleEventId      String
+  createdAt          DateTime @default(now())
+
+  @@index([patientUserId, familyUserId])
+  @@index([prescriptionItemId])
+}
+
+model FamilyInvite {
+  id            String             @id @default(cuid())
+  patientUserId String
+  invitedEmail  String
+  familyUserId  String?
+  status        FamilyInviteStatus @default(PENDING)
+  createdAt     DateTime           @default(now())
+  respondedAt   DateTime?
+  revokedAt     DateTime?
+
+  patient User @relation("SentInvites", fields: [patientUserId], references: [id])
+
+  @@index([patientUserId, status])
+  @@index([invitedEmail, status])
+  @@unique([patientUserId, invitedEmail])
+}
+
+model Prescription {
+  id           String             @id @default(cuid())
+  ownerId      String
+  diseaseName  String?
+  followUpDate DateTime?
+  sourceFileKey String
+  ocrRawText   String?
+  parsedJson   Json?
+  confirmedJson Json?
+  status       PrescriptionStatus @default(UPLOADED)
+  createdAt    DateTime           @default(now())
+  confirmedAt  DateTime?
+
+  owner User @relation("UserPrescriptions", fields: [ownerId], references: [id])
+  items PrescriptionItem[]
+
+  @@index([ownerId, createdAt(sort: Desc)])
+  @@index([diseaseName])
+}
+
+model PrescriptionItem {
+  id             String   @id @default(cuid())
+  prescriptionId String
+  medName        String
+  dosage         String?
+  timesPerDay    Int?
+  durationDays   Int?
+  userSchedule   Json?
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+}

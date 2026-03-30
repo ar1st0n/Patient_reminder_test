@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: takecare
+      POSTGRES_USER: takecare
+      POSTGRES_PASSWORD: takecare
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U takecare -d takecare"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:3.0.0
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=eventbridge,sqs
+      - DEBUG=1
+    volumes:
+      - "./localstack:/var/lib/localstack"
+
+  core-api:
+    build:
+      context: ./services/core-api
+    environment:
+      NODE_ENV: development
+      PORT: "4000"
+      DATABASE_URL: postgresql://takecare:takecare@postgres:5432/takecare?schema=public
+      WORKFLOW_BASE_URL: http://workflow:4001
+      AUTH_MODE: local_jwt
+      JWT_DEV_SECRET: dev_secret_change_me
+      FILE_STORAGE_MODE: local
+      FILE_STORAGE_LOCAL_DIR: /data/uploads
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    volumes:
+      - ./services/core-api:/app
+      - /app/node_modules
+      - core_api_uploads:/data/uploads
+    command:
+      [
+        "sh",
+        "-lc",
+        "if [ ! -d node_modules ]; then npm install; fi; npm run db:push; npm run start:dev",
+      ]
+
+  workflow:
+    build:
+      context: ./services/workflow
+    environment:
+      NODE_ENV: development
+      PORT: "4001"
+      DATABASE_URL: postgresql://takecare:takecare@postgres:5432/takecare?schema=public
+      AUTH_MODE: local_jwt
+      JWT_DEV_SECRET: dev_secret_change_me
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    ports:
+      - "4001:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    volumes:
+      - ./services/workflow:/app
+      - /app/node_modules
+    command:
+      [
+        "sh",
+        "-lc",
+        "if [ ! -d node_modules ]; then npm install; fi; npm run start:dev",
+      ]
+
+  web:
+    build:
+      context: ./services/web
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - core-api
+    volumes:
+      - ./services/web:/app
+      - /app/node_modules
+    command:
+      [
+        "sh",
+        "-lc",
+        "if [ ! -d node_modules ]; then npm install; fi; npm run dev -- --hostname 0.0.0.0 --port 3000",
+      ]
+
+volumes:
+  postgres_data:
+  core_api_uploads:
