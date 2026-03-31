@@ -4,99 +4,323 @@ Take Care Patient là nền tảng hỗ trợ bệnh nhân quản lý đơn thu�
 
 Tài liệu chi tiết về MVP/UX/flow/kiến trúc đang nằm trong `c:\Honguyen\Patient\.trae\documents\`.
 
-## 1) Mục tiêu & nguyên tắc
+## Main Features
 
-- Dễ dùng cho người trung niên/lớn tuổi: font lớn, nút lớn, luồng theo từng bước.
-- AI/OCR có sai số: luôn có bước `Review/Confirm` để người dùng sửa.
-- Bảo mật dữ liệu y tế: ảnh đơn thuốc lưu private; cấp quyền xem bằng cơ chế invite/accept; revoke hiệu lực ngay.
+- Upload prescription image/PDF
+- OCR + parse prescription data
+- Review and confirm prescription details
+- Search prescription history by disease name
+- Family access with invite → accept → revoke flow
+- Patient calendar sync
+- Family export to family Google Calendar
 
-## 2) Kiến trúc tổng thể (enterprise AWS)
+## Tech Stack
 
-### 2.1 Polyrepo + repo tổng thể
+- Frontend: Next.js + React + TypeScript
+- Backend: NestJS
+- Database: PostgreSQL + Prisma
+- Local infra: Docker Compose, LocalStack
+- OCR: currently local/dev implementation may differ by environment
+- Auth in local: `local_jwt`
 
-Chúng ta dùng **polyrepo** (mỗi service 1 repo) để CI/CD và trách nhiệm rõ ràng, nhưng vẫn có 1 repo tổng thể để team dễ onboarding.
+## Local Setup
 
-- **Repo tổng thể** (umbrella): `takecare-platform`
-  - Chứa docs, hướng dẫn, `docker-compose.yml`.
-  - Dùng **git submodules** để pull các repo service.
+### 1. Clone the repository
 
-- **Các repo service**:
-  - `takecare-web`: Next.js SSR chạy container
-  - `takecare-core-api`: NestJS chạy Lambda adapter (API Gateway → Lambda)
-  - `takecare-workflow`: NestJS chạy Lambda adapter (EventBridge → Lambda)
+### 2. Install dependencies
+If you are using Docker for all services, local `npm i` is optional.
 
-- **Các repo infra (CDK)**:
-  - `takecare-infra-core`: Cognito, RDS, S3 private, API Gateway, Lambda core/workflow, EventBridge, artifact bucket…
-  - `takecare-infra-web`: ECR web, ECS/Fargate, ALB, CloudFront, logs/alarms…
 
-### 2.2 Luồng runtime trên AWS
+## Run the Project
+From the project root:
 
-- Web SSR: `CloudFront → ALB → ECS/Fargate (Next.js)`
-- Core API: `API Gateway → Lambda (NestJS adapter) → RDS/S3/Google Vision`
-- Workflow: `EventBridge → Lambda (NestJS adapter) → Google Calendar API`
+```bash
+docker compose up --build
+```
 
-### 2.3 Auth & Calendar
+Or run in background:
 
-- Login: AWS Cognito, người dùng đăng nhập bằng `Login with Google` (federation, scope cơ bản).
-- Google Calendar: chỉ xin consent calendar scope khi user bật sync/export; lưu refresh token (mã hoá).
+```bash
+docker compose up -d --build
+```
 
-## 3) Luồng sản phẩm MVP (user-facing)
+### Start only infrastructure first
 
-### 3.1 Wizard 3 bước cho đơn thuốc
+```bash
+docker compose up -d postgres localstack
+```
 
-1. **Upload** (user upload ảnh/PDF)
-2. **OCR Processing** (user bấm `Process` để chạy OCR/parse; chạy **sync trong Core API**)
-3. **Review/Confirm** (user sửa + xác nhận; sau đó mới sync calendar)
+### Stop services
 
-### 3.2 Family access (invite/accept) + export calendar
+```bash
+docker compose down
+```
 
-- Patient mời family bằng email → trạng thái `pending`.
-- Family đăng nhập → `Accept` → có quyền xem read-only.
-- Family có thể `Export to my Google Calendar`.
-- Patient `Revoke` → mất quyền ngay + workflow tự xoá các event đã export trong calendar family.
+### Reset containers and volumes
 
-## 4) OpenAPI contract (polyrepo)
+Use this if you need a clean local database:
 
-FE/BE không share types trực tiếp. Hợp đồng API đi theo **OpenAPI**:
+```bash
+docker compose down -v
+```
 
-- `takecare-core-api` sinh `openapi.json`.
-- Pipeline publish `openapi.json` lên **S3 artifact bucket** theo version.
-- `takecare-web` tải artifact đúng version và generate SDK client trước khi build.
+## Default Local URLs
 
-## 5) Local development (docker-compose MVP)
+- Web: `http://localhost:3000`
+- Core API: `http://localhost:4000`
+- Workflow: `http://localhost:4001`
+- LocalStack: `http://localhost:4566`
 
-Mục tiêu: dev chạy được toàn bộ stack bằng 1 lệnh.
+## Local Environment Notes
 
-### 5.1 Thành phần local
+Current Docker setup uses:
 
-- `web` (Next dev server trong container)
-- `core-api` (Nest trong container)
-- `workflow` (Nest trong container)
-- `postgres` (local DB)
+- local auth mode: `AUTH_MODE=local_jwt`
+- PostgreSQL database: `takecare`
+- PostgreSQL username: `takecare`
+- PostgreSQL password: `takecare`
 
-### 5.2 Auth và async ở local
+Inside Docker, services connect to Postgres using:
 
-- Auth local: dùng **local JWT mock** (chỉ bật ở local), để không phụ thuộc Cognito ngay.
-- Async local: core-api gọi workflow qua HTTP nội bộ (dev-only). Prod dùng EventBridge.
+```text
+postgresql://takecare:takecare@postgres:5432/takecare?schema=public
+```
 
-## 6) Quy tắc làm việc cho team
+Do not change `@postgres:5432` for container-to-container communication unless you also change the internal service config.
 
-### 6.1 Branching & PR
+## Database Setup
 
-- Mỗi repo dùng PR-based workflow: `feature/*` → PR → review → merge.
-- Thay đổi API contract:
-  - Update `takecare-core-api` trước
-  - Publish `openapi.json` version mới
-  - Update `takecare-web` để pull version đó và regenerate SDK
+`core-api` runs Prisma push on startup with:
 
-### 6.2 Versioning
+```bash
+npm run db:push
+```
 
-- `takecare-core-api` version theo semver (khuyến nghị).
-- `openapi.json` publish theo version tag của core-api.
+You can also run it manually:
 
-## 7) Tài liệu liên quan
+```bash
+docker compose run --rm core-api npm run db:push
+```
 
-- PRD: `c:\Honguyen\Patient\.trae\documents\PRD_MVP_DonThuoc_OCR_GoogleCalendar.md`
-- Kiến trúc: `c:\Honguyen\Patient\.trae\documents\KienTrucKyThuat_MVP_DonThuoc_OCR_Calendar_Supabase.md`
-- Thiết kế responsive: `c:\Honguyen\Patient\.trae\documents\ThietKeTrang_MVP_DonThuoc_OCR_Calendar_DesktopFirst.md`
-- Hướng dẫn family access: `c:\Honguyen\Patient\.trae\documents\HuongDanSuDung_FamilyAccess.md`
+## Inspect the Database
+
+### Option 1: psql inside Docker
+
+```bash
+docker compose exec postgres psql -U takecare -d takecare
+```
+
+Useful commands inside `psql`:
+
+```sql
+\dt
+SELECT * FROM "User";
+SELECT * FROM "Prescription";
+SELECT * FROM "FamilyInvite";
+\q
+```
+
+### Option 2: pgAdmin / TablePlus / DBeaver
+
+Use these connection settings:
+
+- Host: `127.0.0.1`
+- Port: `5432` or your remapped host port
+- Database: `takecare`
+- Username: `takecare`
+- Password: `takecare`
+
+### If port `5432` is already used on your machine
+
+If you already have another local PostgreSQL service, GUI tools may connect to the wrong server.
+
+In that case, change the Postgres host port in `docker-compose.yml`:
+
+```yml
+ports:
+  - "5433:5432"
+```
+
+Then restart Postgres:
+
+```bash
+docker compose down
+docker compose up -d postgres
+```
+
+Then connect GUI tools.
+Important: this only changes host access. Keep the internal Docker `DATABASE_URL` as:
+
+```text
+postgresql://takecare:takecare@postgres:5432/takecare?schema=public
+```
+
+### Option 3: Prisma Studio
+
+From `services/core-api`:
+
+```bash
+DATABASE_URL="postgresql://takecare:takecare@127.0.0.1:5432/takecare?schema=public" npx prisma studio
+```
+
+On PowerShell:
+
+```powershell
+$env:DATABASE_URL="postgresql://takecare:takecare@127.0.0.1:5432/takecare?schema=public"
+npx prisma studio
+```
+
+Then open:
+
+```text
+http://localhost:5555
+```
+
+## Common Developer Workflow
+
+### Boot project
+
+```bash
+docker compose up -d postgres localstack
+docker compose up --build core-api workflow web
+```
+
+### Check service status
+
+```bash
+docker compose ps
+```
+
+### Watch logs
+
+```bash
+docker compose logs -f
+docker compose logs -f core-api
+docker compose logs -f workflow
+docker compose logs -f web
+```
+
+## Common Issues
+
+### 1. `prisma generate` fails in workflow build
+
+Typical error:
+
+```text
+Could not find Prisma Schema that is required for this command
+```
+
+Cause:
+
+- `services/workflow/prisma/schema.prisma` is missing, or
+- the workflow Dockerfile runs `npm ci` before copying `prisma/`
+
+Fix:
+
+- ensure `services/workflow/prisma/schema.prisma` exists
+- ensure the workflow Dockerfile copies `prisma/` before `npm ci` if `postinstall` runs `prisma generate`
+
+### 2. Password authentication failed in pgAdmin
+
+Cause is often not the database itself, but one of these:
+
+- pgAdmin connected to another PostgreSQL server on the same port
+- old/stale saved connection in GUI tool
+- host port conflict with another project
+
+Fix:
+
+- verify Docker Postgres is running
+- test login from inside Docker:
+
+```bash
+docker compose exec postgres psql -U takecare -d takecare
+```
+
+- if needed, reset password inside psql:
+
+```sql
+ALTER USER takecare WITH PASSWORD 'takecare';
+```
+
+- if host port conflicts exist, remap Docker host port to `5433`
+
+### 3. Another PostgreSQL is already using port 5432
+
+Check on Windows PowerShell:
+
+```powershell
+netstat -ano | findstr :5432
+```
+
+If more than one process is listening, GUI tools may hit the wrong DB.
+
+## Suggested First Verification
+
+After the project boots:
+
+1. Open `http://localhost:3000`
+2. Open pgAdmin/TablePlus/Prisma Studio
+3. Confirm the `takecare` database is reachable
+4. Verify the tables exist
+5. Upload a test file in the app
+6. Check whether a row is created in `Prescription`
+
+## Useful Commands Reference
+
+```bash
+# Start everything
+docker compose up --build
+
+# Start in background
+docker compose up -d --build
+
+# Stop everything
+docker compose down
+
+# Reset all volumes
+docker compose down -v
+
+# Show running services
+docker compose ps
+
+# View all logs
+docker compose logs -f
+
+# View one service logs
+docker compose logs -f core-api
+docker compose logs -f workflow
+docker compose logs -f web
+
+# Open Postgres shell
+docker compose exec postgres psql -U takecare -d takecare
+
+# Apply Prisma schema
+docker compose run --rm core-api npm run db:push
+```
+
+## Notes for Future Improvements
+
+Once the project is stable locally, consider improving:
+
+- Prisma relations and constraints for family access flow
+- calendar event mapping tables
+- workflow startup and Prisma generation consistency
+- auth parity between local and production
+- seed script for local test users and sample prescriptions
+
+---
+
+If you are cloning this project for the first time, start with:
+
+```bash
+docker compose up --build
+```
+
+If something fails, check:
+
+```bash
+docker compose logs -f core-api
+docker compose logs -f workflow
+docker compose logs -f web
+```
