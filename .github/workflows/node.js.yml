@@ -23,13 +23,19 @@ jobs:
         node-version: [22.x, 24.x]
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
-    steps:
-    - uses: actions/checkout@v5
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v5
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: npm run build --if-present
-    - run: npm test
+steps:
+  - uses: actions/checkout@v5
+  - uses: actions/setup-node@v5
+    with:
+      node-version: ${{ matrix.node-version }}
+      cache: 'npm'
+      cache-dependency-path: services/core-api/package-lock.json  # add this
+
+  - run: npm ci
+    working-directory: services/core-api   # add this
+
+  - run: npm run build --if-present
+    working-directory: services/core-api   # add this
+
+  - run: npm test
+    working-directory: services/core-api   # add this
