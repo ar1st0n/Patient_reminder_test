@@ -1,11 +1,6 @@
 {
-  "name": "patient-reminder",
-  "version": "1.0.0",
-  "description": "Patient reminder application with prescription OCR and calendar integration",
-  "private": true,
-  "workspaces": [
-    "services/core-api",
-    "services/web",
-    "services/workflow"
-  ]
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
 }
